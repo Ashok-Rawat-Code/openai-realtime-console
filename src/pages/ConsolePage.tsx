@@ -24,9 +24,6 @@ import { Button } from '../components/button/Button';
 import { Toggle } from '../components/toggle/Toggle';
 import { Map } from '../components/Map';
 
-import './ConsolePage.scss';
-import { isJsxOpeningLikeElement } from 'typescript';
-
 /**
  * Type for result from get_weather() function call
  */
@@ -55,18 +52,36 @@ interface RealtimeEvent {
 }
 
 export function ConsolePage() {
-  /**
-   * Ask user for API Key
-   * If we're using the local relay server, we don't need this
-   */
-  const apiKey = LOCAL_RELAY_SERVER_URL
-    ? ''
-    : localStorage.getItem('tmp::voice_api_key') ||
-      prompt('OpenAI API Key') ||
-      '';
-  if (apiKey !== '') {
-    localStorage.setItem('tmp::voice_api_key', apiKey);
-  }
+  const [apiKey, setApiKey] = useState<string>('');
+  const clientRef = useRef<RealtimeClient | null>(null);
+
+  useEffect(() => {
+    // call localStorage operations inside useEffect to ensure they run only on the client side
+    const storedApiKey = localStorage.getItem('tmp::voice_api_key') || '';
+    setApiKey(storedApiKey);
+
+    if (!LOCAL_RELAY_SERVER_URL && !storedApiKey) {
+      const newApiKey = prompt('OpenAI API Key') || '';
+      if (newApiKey) {
+        localStorage.setItem('tmp::voice_api_key', newApiKey);
+        setApiKey(newApiKey);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initialize RealtimeClient when apiKey is available
+    if (apiKey || LOCAL_RELAY_SERVER_URL) {
+      clientRef.current = new RealtimeClient(
+        LOCAL_RELAY_SERVER_URL
+        ? { url: LOCAL_RELAY_SERVER_URL }
+        : {
+            apiKey: apiKey,
+            dangerouslyAllowAPIKeyInBrowser: true,
+          }
+      );
+    }
+  }, [apiKey]);
 
   /**
    * Instantiate:
@@ -79,16 +94,6 @@ export function ConsolePage() {
   );
   const wavStreamPlayerRef = useRef<WavStreamPlayer>(
     new WavStreamPlayer({ sampleRate: 24000 })
-  );
-  const clientRef = useRef<RealtimeClient>(
-    new RealtimeClient(
-      LOCAL_RELAY_SERVER_URL
-        ? { url: LOCAL_RELAY_SERVER_URL }
-        : {
-            apiKey: apiKey,
-            dangerouslyAllowAPIKeyInBrowser: true,
-          }
-    )
   );
 
   /**
@@ -150,10 +155,11 @@ export function ConsolePage() {
    * When you click the API key
    */
   const resetAPIKey = useCallback(() => {
-    const apiKey = prompt('OpenAI API Key');
-    if (apiKey !== null) {
+    const newApiKey = prompt('OpenAI API Key');
+    if (newApiKey !== null) {
       localStorage.clear();
-      localStorage.setItem('tmp::voice_api_key', apiKey);
+      localStorage.setItem('tmp::voice_api_key', newApiKey);
+      setApiKey(newApiKey);
       window.location.reload();
     }
   }, []);
@@ -164,6 +170,7 @@ export function ConsolePage() {
    */
   const connectConversation = useCallback(async () => {
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     const wavRecorder = wavRecorderRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
 
@@ -209,6 +216,7 @@ export function ConsolePage() {
     setMarker(null);
 
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     client.disconnect();
 
     const wavRecorder = wavRecorderRef.current;
@@ -220,6 +228,7 @@ export function ConsolePage() {
 
   const deleteConversationItem = useCallback(async (id: string) => {
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     client.deleteItem(id);
   }, []);
 
@@ -230,6 +239,7 @@ export function ConsolePage() {
   const startRecording = async () => {
     setIsRecording(true);
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     const wavRecorder = wavRecorderRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
     const trackSampleOffset = await wavStreamPlayer.interrupt();
@@ -237,7 +247,9 @@ export function ConsolePage() {
       const { trackId, offset } = trackSampleOffset;
       await client.cancelResponse(trackId, offset);
     }
-    await wavRecorder.record((data) => client.appendInputAudio(data.mono));
+    await wavRecorder.record((data) => {
+        client.appendInputAudio(data.mono);
+    });
   };
 
   /**
@@ -246,9 +258,10 @@ export function ConsolePage() {
   const stopRecording = async () => {
     setIsRecording(false);
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     const wavRecorder = wavRecorderRef.current;
     await wavRecorder.pause();
-    client.createResponse();
+      client.createResponse();
   };
 
   /**
@@ -256,6 +269,7 @@ export function ConsolePage() {
    */
   const changeTurnEndType = async (value: string) => {
     const client = clientRef.current;
+    if(!client) throw new Error('RealtimeClient is not initialized');
     const wavRecorder = wavRecorderRef.current;
     if (value === 'none' && wavRecorder.getStatus() === 'recording') {
       await wavRecorder.pause();
@@ -375,6 +389,7 @@ export function ConsolePage() {
     // Get refs
     const wavStreamPlayer = wavStreamPlayerRef.current;
     const client = clientRef.current;
+    if(!client) return;
 
     // Set instructions
     client.updateSession({ instructions: instructions });
@@ -498,7 +513,7 @@ export function ConsolePage() {
       // cleanup; resets to defaults
       client.reset();
     };
-  }, []);
+  }, [clientRef.current]);
 
   /**
    * Render the application

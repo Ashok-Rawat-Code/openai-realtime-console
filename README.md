@@ -21,7 +21,7 @@ $ npm i
 Start your server with:
 
 ```shell
-$ npm start
+$ npm run dev
 ```
 
 It should be available via `localhost:3000`.
